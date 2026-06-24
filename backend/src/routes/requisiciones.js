@@ -56,6 +56,7 @@ router.post('/', async (req, res) => {
   if (Number(cantidad) <= 0) {
     return res.status(400).json({ error: 'cantidad debe ser mayor a 0' });
   }
+  const dfuManualNum = parseInt(dfu_manual, 10) || 0;
 
   // --- Obtener área y producto (necesarios para las reglas de negocio) ---
   const { data: area, error: errArea } = await supabase
@@ -104,7 +105,7 @@ router.post('/', async (req, res) => {
         fecha_manufactura: fechaMfg, fecha_expiracion, on_pack_numero,
         cantidad_caja: cant.caja, cantidad_bolsa: cant.bolsa, cantidad_insert: cant.insert,
         cantidad_on_pack: cant.on_pack, cantidad_tbox: cant.tbox, cantidad_opbox: cant.opbox,
-        dfu_manual, solicitante, notas,
+        dfu_manual: dfuManualNum, solicitante, notas,
       })
       .select()
       .single();

@@ -142,3 +142,15 @@ el valor real es **"N/A"**, no los 5 caracteres. Corregido en
 4. **Error**: `deriveOnPack()` devolvía siempre los primeros 5 caracteres
    del Código DC. **Real**: devuelve "N/A" si la cantidad de On Pack
    calculada es 0. **Corrección**: aplicada y probada.
+5. **Encontrado en revisión de esquema con el usuario** (no era un error de
+   lógica de negocio, sino de tipado/validación): `dfu_manual` estaba como
+   `TEXT` en vez de `INTEGER` — permitía guardar texto no numérico que
+   reventaría cálculos después. **Corrección**: columna a `INTEGER NOT NULL
+   DEFAULT 0`; la ruta ahora hace `parseInt()` antes de insertar. También se
+   agregó `CHECK (secuencia BETWEEN 1 AND 99)` a nivel de tabla como defensa
+   adicional, por si algún día se inserta directo sin pasar por la función
+   atómica. Probado con Postgres real: secuencia 0 y 100 rechazadas,
+   `dfu_manual='abc'` rechazado por el motor, inserción válida con
+   `dfu_manual=7` aceptada correctamente. También se limpió un comentario
+   viejo y contradictorio en `catalogo_productos` que quedó de una edición
+   anterior (decía "PENDIENTE" justo arriba de "VALIDADO").

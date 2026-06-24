@@ -29,9 +29,6 @@ CREATE TABLE IF NOT EXISTS areas (
 -- ----------------------------------------------------------------------------
 -- 2. CATÁLOGO DE PRODUCTOS
 -- ----------------------------------------------------------------------------
--- PENDIENTE: poblar con los 1,492 códigos reales desde ExcelRequisiciones.xlsx
--- (sheet "Ref. de Codigo terminado"). Por ahora solo la estructura, validada
--- contra las reglas de negocio confirmadas en sesiones anteriores.
 -- VALIDADO contra ExcelRequisiciones.xlsx, hoja "Ref. de Codigo terminado"
 -- (1,492 códigos únicos; 1,493 filas en el Excel por un duplicado de llave
 -- ya resuelto tomando el último valor, igual que en el catálogo embebido
@@ -126,13 +123,18 @@ CREATE TABLE IF NOT EXISTS requisiciones (
     cantidad_on_pack     INTEGER NOT NULL DEFAULT 0,
     cantidad_tbox        INTEGER NOT NULL DEFAULT 0,
     cantidad_opbox       INTEGER NOT NULL DEFAULT 0,
-    dfu_manual           TEXT,
+    dfu_manual           INTEGER NOT NULL DEFAULT 0,
     solicitante          TEXT NOT NULL,
     notas                TEXT,
     estado               TEXT NOT NULL DEFAULT 'pendiente'
                           CHECK (estado IN ('pendiente','en_impresion','lista','rechazada','cancelada')),
     creado_en            TIMESTAMPTZ NOT NULL DEFAULT now(),
     actualizado_en       TIMESTAMPTZ NOT NULL DEFAULT now(),
+
+    -- Defensa adicional: la funcion siguiente_secuencia_lote() ya limita a
+    -- 1-99, pero un INSERT directo a la tabla (sin pasar por la funcion) no
+    -- estaria protegido sin este CHECK.
+    CHECK (secuencia BETWEEN 1 AND 99),
 
     -- Redundancia defensiva: ni siquiera la combinación área+año+día+secuencia
     -- se puede repetir, independientemente del string de numero_lote.
