@@ -9,7 +9,9 @@ de datos PostgreSQL real con garantías de no-duplicado a nivel de motor.
 2. En el **SQL Editor** de tu proyecto, pega y ejecuta el contenido completo
    de `database/schema.sql`.
 3. Después ejecuta `database/seed_areas.sql` para cargar el mapeo de áreas.
-4. En **Project Settings → API**, copia:
+4. Después ejecuta `database/seed_catalogo.sql` para cargar los 1,492
+   códigos reales del catálogo (puede tardar unos segundos por el tamaño).
+5. En **Project Settings → API**, copia:
    - `Project URL` → va en `SUPABASE_URL`
    - `service_role` key (no la `anon` key) → va en `SUPABASE_SERVICE_ROLE_KEY`
 
@@ -29,40 +31,40 @@ curl http://localhost:3001/api/health
 curl http://localhost:3001/api/areas
 ```
 
-## 4. Antes de usar con datos reales — leer CLAUDE.md
-Hay dos pendientes críticos documentados en `CLAUDE.md`:
-1. El cálculo exacto del número de lote (`construirNumeroLote` en
-   `backend/src/loteLogic.js`) es un placeholder — falta verificar contra
-   el archivo original.
-2. El catálogo de productos está vacío de datos reales (1,492 códigos
-   pendientes de importar desde el Excel).
+## 4. Estado de la lógica de negocio
+La fórmula del número de lote y el catálogo de 1,492 códigos ya están
+verificados contra el archivo original y contra el ejemplo real impreso
+en FORM-21920. Ver `CLAUDE.md` para el detalle de la verificación y la
+bitácora de correcciones. Pendientes reales: frontend, interfaz de Admin,
+autenticación, y fijar `TZ=America/Hermosillo` en el backend al desplegar.
 
 ## Endpoints disponibles
 | Método | Ruta                              | Descripción                                |
 |--------|-----------------------------------|---------------------------------------------|
 | GET    | `/api/health`                     | Estado del servicio                          |
 | GET    | `/api/areas`                      | Lista de áreas activas                       |
-| GET    | `/api/catalogo?buscar=88183`      | Búsqueda en catálogo                         |
-| GET    | `/api/catalogo/:codigo`           | Detalle de un código                         |
+| GET    | `/api/catalogo?buscar=70220861`   | Búsqueda en catálogo                         |
+| GET    | `/api/catalogo/:codigo`           | Detalle de un código (por codigo_catalogo)   |
 | GET    | `/api/requisiciones`              | Lista (filtros: `area_id`, `estado`, `fecha_produccion`) |
 | POST   | `/api/requisiciones`              | Crear requisición (genera lote atómicamente) |
 | PATCH  | `/api/requisiciones/:id/estado`   | Cambiar estado (valida transición permitida) |
 
 ## Estructura
 ```
-lean-labels-db/
+OwensControl/
 ├── CLAUDE.md              # bitácora de decisiones, validaciones y pendientes
 ├── README.md
-├── .env.example
 ├── database/
 │   ├── schema.sql         # esquema completo, validado con pruebas de concurrencia real
-│   └── seed_areas.sql
+│   ├── seed_areas.sql
+│   └── seed_catalogo.sql  # 1,492 códigos reales
 └── backend/
     ├── package.json
+    ├── .env.example
     └── src/
         ├── server.js
         ├── supabaseClient.js
-        ├── loteLogic.js
+        ├── loteLogic.js    # formula del lote verificada contra FORM-21920
         └── routes/
             ├── areas.js
             ├── catalogo.js

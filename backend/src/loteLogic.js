@@ -1,106 +1,114 @@
 /**
  * loteLogic.js
  *
- * Reglas de negocio confirmadas y validadas en sesiones anteriores contra
- * el Excel real (17,000 fórmulas recalculadas, 16 filas reales verificadas).
- *
- * ============================================================================
- * ADVERTENCIA — NO USAR EN PRODUCCIÓN SIN VERIFICAR:
- * La función `construirNumeroLote()` de este archivo es un PLACEHOLDER.
- * No se reconstruyó copiando la lógica exacta del archivo original
- * (lean-labels-requisiciones-demo.html) porque ese archivo no estaba
- * disponible en esta sesión. Antes de usar este sistema con datos reales,
- * hay que sustituir esta función por el algoritmo exacto ya validado.
- * Ver CLAUDE.md → "Pendientes" para el detalle de este punto.
- * ============================================================================
+ * Logica de negocio PORTADA Y VERIFICADA contra el archivo original
+ * lean-labels-requisiciones-demo.html (subido y revisado linea por linea).
+ * Verificada tambien contra el ejemplo real impreso en FORM-21920:
+ *   Lot # = AC2617303A, Fecha de Manufactura = 2026-06-22
+ *   -> AC + "26" + "173" (dia del anio de 2026-06-22) + "03" + "A" (Doboy A)
+ * Ver CLAUDE.md para el detalle de la verificacion.
  */
 
-function addYears(date, years) {
-  const d = new Date(date);
-  d.setFullYear(d.getFullYear() + years);
-  return d;
+const PLANT_CODE = 'AC';
+
+// Los 5 codigos reales con regla de expiracion a 3 anios (confirmado contra
+// el catalogo embebido del demo Y contra ExcelRequisiciones.xlsx). Son
+// variantes especificas de los 3 codigos base que menciona WI-29566
+// 6.8.2.1 (77885, 44642, 88227) - el WI lista los codigos DC base, el
+// catalogo real lista las variantes especificas (Codigo Pre Steril).
+const SHORT_EXP_CODES = ['70219294', '70219058', '70219315', '70216181', '70202685'];
+const THERMAL_DOBOY_AREA = 'Thermal Doboy';
+
+function pad(n, w) {
+  return String(n).padStart(w, '0');
 }
 
-function toISODate(date) {
-  return date.toISOString().slice(0, 10);
+// Idéntico al dayOfYear() del demo original.
+function dayOfYear(date) {
+  const start = new Date(date.getFullYear(), 0, 0);
+  return Math.floor((date - start) / 86400000);
 }
 
-function diaDelAnio(date) {
-  const d = new Date(date);
-  const inicioAnio = new Date(d.getFullYear(), 0, 0);
-  const diff = d - inicioAnio;
-  return Math.floor(diff / (1000 * 60 * 60 * 24));
+// Idéntico al addYears() del demo original (construye en hora local,
+// evita el corrimiento de día por UTC).
+function addYears(iso, years) {
+  const [y, m, d] = iso.split('-').map(Number);
+  const dt = new Date(y + years, m - 1, d);
+  return dt.toISOString().slice(0, 10);
 }
 
 /**
- * Calcula la fecha de expiración según las 3 ramas confirmadas:
- *   - Área Thermal Doboy            -> +1 año
- *   - Código marcado pre_esteril_3_anios -> +3 años
- *   - Todos los demás               -> +5 años
- *
- * @param {string} fechaManufacturaISO  'YYYY-MM-DD'
- * @param {{letra: string}} area
- * @param {{pre_esteril_3_anios: boolean}} producto
+ * Fecha de expiración: Thermal Doboy -> +1 año (checado primero);
+ * código en SHORT_EXP_CODES -> +3 años; todo lo demás -> +5 años.
+ * @param {string} mfgIso fecha de manufactura 'YYYY-MM-DD'
+ * @param {string} codigoCatalogo el "Codigo Pre Steril" (llave de catálogo)
+ * @param {string} areaName nombre del área, ej. 'Thermal Doboy'
  */
-function calcularFechaExpiracion(fechaManufacturaISO, area, producto) {
-  const base = new Date(fechaManufacturaISO);
+function computeExpDate(mfgIso, codigoCatalogo, areaName) {
+  if (!mfgIso) return '';
+  let years = 5;
+  if (areaName === THERMAL_DOBOY_AREA) years = 1;
+  else if (SHORT_EXP_CODES.includes(String(codigoCatalogo))) years = 3;
+  return addYears(mfgIso, years);
+}
 
-  if (area.letra === 'T') {
-    return toISODate(addYears(base, 1));
+/**
+ * On Pack Product # = primeros 5 caracteres de Código DC, PERO solo si la
+ * cantidad de On Pack calculada es mayor a 0 — si es 0, el valor real es
+ * "N/A" (no hay etiquetas On Pack que requieran ese número).
+ */
+function deriveOnPack(codigoDC, onPackQty) {
+  if (!onPackQty || onPackQty === 0) return 'N/A';
+  return codigoDC ? codigoDC.slice(0, 5) : '';
+}
+
+/**
+ * Calcula las 6 cantidades reales (caja, bolsa, insert, on_pack, tbox,
+ * opbox) multiplicando la cantidad pedida por los multiplicadores del
+ * catálogo. dfu_manual se captura aparte (no es catálogo-driven).
+ */
+function computeCantidades(cantidad, catalogEntry) {
+  const qty = parseInt(cantidad, 10) || 0;
+  if (!catalogEntry) {
+    return { caja: 0, bolsa: 0, insert: 0, on_pack: 0, tbox: 0, opbox: 0 };
   }
-  if (producto.pre_esteril_3_anios) {
-    return toISODate(addYears(base, 3));
-  }
-  return toISODate(addYears(base, 5));
+  return {
+    caja: qty * (catalogEntry.mult_caja || 0),
+    bolsa: qty * (catalogEntry.mult_bolsa || 0),
+    insert: qty * (catalogEntry.mult_insert || 0),
+    on_pack: qty * (catalogEntry.mult_on_pack || 0),
+    tbox: qty * (catalogEntry.mult_tbox || 0),
+    opbox: qty * (catalogEntry.mult_opbox || 0),
+  };
 }
 
 /**
- * On Pack # = primeros 5 caracteres del Código DC (confirmado, no derivado
- * matemáticamente, valor literal del catálogo para Código Alterno aparte).
+ * Construye el número de lote completo: PLANT_CODE + año-de-HOY(2d) +
+ * día-del-año-de-FechaProduccion(3d) + secuencia(2d) + letra-de-área.
+ * El año viene de HOY (fecha de captura), NO del año de fecha_produccion
+ * — esto es así en el sistema real, confirmado en el archivo original.
  */
-function calcularOnPackNumero(codigoDC) {
-  return String(codigoDC).slice(0, 5);
-}
-
-/**
- * Etiquetas de Caja = catálogo-driven, multiplicador casi siempre x2,
- * dos códigos confirmados con x1 (viven en catalogo_productos.etiquetas_caja_multiplicador).
- */
-function calcularEtiquetasCaja(cantidad, multiplicadorCatalogo) {
-  return cantidad * multiplicadorCatalogo;
-}
-
-/**
- * PLACEHOLDER — pendiente de reemplazar con la fórmula exacta.
- *
- * Lo que SÍ sabemos, confirmado en sesiones anteriores:
- *   - Usa el año actual (no necesariamente el año de fecha_produccion)
- *   - Usa el día-del-año calculado a partir de la Fecha de Producción
- *     capturada (no de la fecha de manufactura)
- *   - Hay una fecha ancla interna ("Año: 2025-12-31", 31-dic del año
- *     anterior) usada para la aritmética de día-del-año
- *   - Incorpora la letra de área y una secuencia diaria por área
- *
- * Ejemplo real de FORM-21920 para referencia/validación futura:
- *   Lot # = AC2617303A | Fecha de Manufactura = 2026-06-22
- *   (173 = día del año de 2026-06-22, consistente con la regla de día-del-año)
- *
- * No completar el resto del patrón a ciegas — falta el archivo original.
- */
-function construirNumeroLote({ areaLetra, fechaProduccionISO, secuencia }) {
-  const anioActual = new Date().getFullYear().toString().slice(-2);
-  const doy = diaDelAnio(fechaProduccionISO).toString().padStart(3, '0');
-  const seqStr = secuencia.toString().padStart(2, '0');
-
-  // TODO: sustituir este armado por el algoritmo real validado.
-  return `${areaLetra}${anioActual}${doy}${seqStr}`;
+function construirNumeroLote({ areaLetra, fechaProduccionIso, secuencia }) {
+  const todayYr = pad(new Date().getFullYear() % 100, 2);
+  const prodDate = new Date(fechaProduccionIso + 'T00:00:00');
+  const jd = pad(dayOfYear(prodDate), 3);
+  const seqStr = pad(secuencia, 2);
+  return {
+    numero_lote: PLANT_CODE + todayYr + jd + seqStr + areaLetra,
+    anio_2d: todayYr,
+    dia_juliano: jd,
+  };
 }
 
 module.exports = {
-  calcularFechaExpiracion,
-  calcularOnPackNumero,
-  calcularEtiquetasCaja,
+  PLANT_CODE,
+  SHORT_EXP_CODES,
+  THERMAL_DOBOY_AREA,
+  computeExpDate,
+  deriveOnPack,
+  computeCantidades,
   construirNumeroLote,
-  diaDelAnio,
-  toISODate,
+  dayOfYear,
+  addYears,
+  pad,
 };

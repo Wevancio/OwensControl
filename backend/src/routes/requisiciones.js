@@ -2,9 +2,9 @@ const express = require('express');
 const router = express.Router();
 const supabase = require('../supabaseClient');
 const {
-  calcularFechaExpiracion,
-  calcularOnPackNumero,
-  calcularEtiquetasCaja,
+  computeExpDate,
+  deriveOnPack,
+  computeCantidades,
   construirNumeroLote,
 } = require('../loteLogic');
 
@@ -27,7 +27,7 @@ router.get('/', async (req, res) => {
 
   let query = supabase
     .from('requisiciones')
-    .select('*, areas(nombre, letra), catalogo_productos(descripcion)')
+    .select('*, areas(nombre, letra), catalogo_productos(codigo_dc, codigo_alterno)')
     .order('creado_en', { ascending: false });
 
   if (area_id) query = query.eq('area_id', area_id);
@@ -42,15 +42,15 @@ router.get('/', async (req, res) => {
 // POST /api/requisiciones — crea una nueva requisición con secuencia de lote atómica
 router.post('/', async (req, res) => {
   const {
-    semana, orden, orden_particionada, codigo_dc, cantidad,
+    semana, orden, orden_particionada, codigo_catalogo, cantidad,
     fecha_produccion, area_id, dfu_manual, solicitante, notas,
     fecha_manufactura,
   } = req.body;
 
   // --- Validaciones básicas de entrada ---
-  if (!orden || !codigo_dc || !cantidad || !fecha_produccion || !area_id || !solicitante) {
+  if (!orden || !codigo_catalogo || !cantidad || !fecha_produccion || !area_id || !solicitante) {
     return res.status(400).json({
-      error: 'Faltan campos obligatorios: orden, codigo_dc, cantidad, fecha_produccion, area_id, solicitante',
+      error: 'Faltan campos obligatorios: orden, codigo_catalogo, cantidad, fecha_produccion, area_id, solicitante',
     });
   }
   if (Number(cantidad) <= 0) {
@@ -63,37 +63,48 @@ router.post('/', async (req, res) => {
   if (errArea || !area) return res.status(400).json({ error: 'Área no válida' });
 
   const { data: producto, error: errProd } = await supabase
-    .from('catalogo_productos').select('*').eq('codigo_dc', codigo_dc).single();
+    .from('catalogo_productos').select('*').eq('codigo_catalogo', codigo_catalogo).single();
   if (errProd || !producto) {
-    return res.status(400).json({ error: `Código ${codigo_dc} no existe en el catálogo` });
+    return res.status(400).json({ error: `Código ${codigo_catalogo} no existe en el catálogo` });
   }
 
   try {
-    // --- Paso 1: secuencia atómica (anti-duplicado real, a nivel de DB) ---
+    // --- Paso 1: construir el numero_lote candidato (incluye anio_2d y dia_juliano) ---
+    // La secuencia se obtiene de forma atomica DESPUES, pero necesitamos
+    // anio_2d/dia_juliano primero para llamar a la funcion con la llave correcta.
+    const previo = construirNumeroLote({ areaLetra: area.letra, fechaProduccionIso: fecha_produccion, secuencia: 1 });
+
     const { data: secuencia, error: errSeq } = await supabase
-      .rpc('siguiente_secuencia_lote', { p_area_id: area_id, p_fecha: fecha_produccion });
+      .rpc('siguiente_secuencia_lote', {
+        p_area_id: area_id,
+        p_anio_2d: previo.anio_2d,
+        p_dia_juliano: previo.dia_juliano,
+      });
     if (errSeq) throw new Error(`No se pudo generar secuencia de lote: ${errSeq.message}`);
+
+    const { numero_lote, anio_2d, dia_juliano } = construirNumeroLote({
+      areaLetra: area.letra,
+      fechaProduccionIso: fecha_produccion,
+      secuencia,
+    });
 
     // --- Paso 2: construir campos derivados ---
     const fechaMfg = fecha_manufactura || fecha_produccion;
-    const numero_lote = construirNumeroLote({
-      areaLetra: area.letra,
-      fechaProduccionISO: fecha_produccion,
-      secuencia,
-    });
-    const fecha_expiracion = calcularFechaExpiracion(fechaMfg, area, producto);
-    const on_pack_numero = calcularOnPackNumero(codigo_dc);
-    const etiquetas_caja = calcularEtiquetasCaja(cantidad, producto.etiquetas_caja_multiplicador);
+    const fecha_expiracion = computeExpDate(fechaMfg, codigo_catalogo, area.nombre);
+    const cant = computeCantidades(cantidad, producto);
+    const on_pack_numero = deriveOnPack(producto.codigo_dc, cant.on_pack);
 
     // --- Paso 3: insertar. El UNIQUE constraint de numero_lote es la última
     //     línea de defensa si, por cualquier motivo, dos lotes coincidieran. ---
     const { data: nueva, error: errInsert } = await supabase
       .from('requisiciones')
       .insert({
-        semana, orden, orden_particionada, codigo_dc, cantidad,
-        fecha_produccion, area_id, secuencia, numero_lote,
+        semana, orden, orden_particionada, codigo_catalogo, cantidad,
+        fecha_produccion, area_id, anio_2d, dia_juliano, secuencia, numero_lote,
         fecha_manufactura: fechaMfg, fecha_expiracion, on_pack_numero,
-        etiquetas_caja, dfu_manual, solicitante, notas,
+        cantidad_caja: cant.caja, cantidad_bolsa: cant.bolsa, cantidad_insert: cant.insert,
+        cantidad_on_pack: cant.on_pack, cantidad_tbox: cant.tbox, cantidad_opbox: cant.opbox,
+        dfu_manual, solicitante, notas,
       })
       .select()
       .single();
