@@ -154,3 +154,22 @@ el valor real es **"N/A"**, no los 5 caracteres. Corregido en
    `dfu_manual=7` aceptada correctamente. También se limpió un comentario
    viejo y contradictorio en `catalogo_productos` que quedó de una edición
    anterior (decía "PENDIENTE" justo arriba de "VALIDADO").
+
+6. **Encontrado al construir el frontend**: el archivo original tiene una
+   sección completa que faltaba en el esquema — la **Conciliación de
+   Etiquetas** (WI-29566 §6.6, mitad inferior de FORM-21920): por cada uno
+   de los 7 tipos de etiqueta, captura Cantidad Extra + verificación (QA
+   Etiquetas/Mfg./QA Empaque), Adicionales, Reposición, Total Entregado a
+   Mfg., Total en DHR, Usadas, Regresadas QA, Destruidas QA, Conciliación
+   Final, más `QA Verified by`, `¿Coinciden las cantidades?` (Sí/No + QNC#)
+   y notas finales. También faltaban `urgencia`, `evaluador`, `comentario`,
+   `fecha_resolucion`, `fecha_lista` — campos reales del flujo de decisión
+   del evaluador (`decidir()`/`marcarLista()` en el demo original).
+   **Decisión**: la conciliación se guarda como `JSONB` (columna
+   `conciliacion`) en vez de una tabla con decenas de columnas dispersas —
+   es una grilla flexible llenada a mano por distintos roles en distintos
+   momentos, sin el mismo riesgo de duplicado que `numero_lote`, así que no
+   amerita el mismo nivel de normalización. Los demás campos son columnas
+   normales. **Validado con Postgres real**: `CHECK` de `urgencia` y
+   `totals_match` rechazando valores fuera de catálogo; guardado y lectura
+   de `conciliacion` JSONB confirmado.

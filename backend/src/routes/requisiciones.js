@@ -43,7 +43,7 @@ router.get('/', async (req, res) => {
 router.post('/', async (req, res) => {
   const {
     semana, orden, orden_particionada, codigo_catalogo, cantidad,
-    fecha_produccion, area_id, dfu_manual, solicitante, notas,
+    fecha_produccion, area_id, dfu_manual, urgencia, solicitante, notas,
     fecha_manufactura,
   } = req.body;
 
@@ -57,6 +57,7 @@ router.post('/', async (req, res) => {
     return res.status(400).json({ error: 'cantidad debe ser mayor a 0' });
   }
   const dfuManualNum = parseInt(dfu_manual, 10) || 0;
+  const urgenciaVal = urgencia === 'Urgente' ? 'Urgente' : 'Normal';
 
   // --- Obtener área y producto (necesarios para las reglas de negocio) ---
   const { data: area, error: errArea } = await supabase
@@ -105,7 +106,7 @@ router.post('/', async (req, res) => {
         fecha_manufactura: fechaMfg, fecha_expiracion, on_pack_numero,
         cantidad_caja: cant.caja, cantidad_bolsa: cant.bolsa, cantidad_insert: cant.insert,
         cantidad_on_pack: cant.on_pack, cantidad_tbox: cant.tbox, cantidad_opbox: cant.opbox,
-        dfu_manual: dfuManualNum, solicitante, notas,
+        dfu_manual: dfuManualNum, urgencia: urgenciaVal, solicitante, notas,
       })
       .select()
       .single();
@@ -131,7 +132,7 @@ router.post('/', async (req, res) => {
 // PATCH /api/requisiciones/:id/estado — cambia estado validando la transición
 router.patch('/:id/estado', async (req, res) => {
   const { id } = req.params;
-  const { nuevo_estado, usuario } = req.body;
+  const { nuevo_estado, usuario, comentario, qnc } = req.body;
 
   if (!nuevo_estado || !usuario) {
     return res.status(400).json({ error: 'Faltan nuevo_estado y usuario' });
@@ -148,11 +149,49 @@ router.patch('/:id/estado', async (req, res) => {
     });
   }
 
+  // Igual que decidir()/marcarLista() del demo original: se registra quién
+  // resolvió, el comentario/QNC si aplica, y la fecha correspondiente.
+  const update = { estado: nuevo_estado };
+  if (['en_impresion', 'rechazada', 'cancelada'].includes(nuevo_estado)) {
+    update.evaluador = usuario;
+    if (comentario) update.comentario = comentario;
+    if (qnc) update.qnc = qnc;
+    update.fecha_resolucion = new Date().toISOString();
+  }
+  if (nuevo_estado === 'lista') {
+    update.fecha_lista = new Date().toISOString();
+  }
+
   const { data: actualizada, error: errUpdate } = await supabase
-    .from('requisiciones').update({ estado: nuevo_estado }).eq('id', id).select().single();
+    .from('requisiciones').update(update).eq('id', id).select().single();
   if (errUpdate) return res.status(500).json({ error: errUpdate.message });
 
-  await registrarAuditoria(id, usuario, `estado:${actual.estado}->${nuevo_estado}`, {});
+  await registrarAuditoria(id, usuario, `estado:${actual.estado}->${nuevo_estado}`, { comentario, qnc });
+  res.json(actualizada);
+});
+
+// PATCH /api/requisiciones/:id/conciliacion — guarda la grilla de Conciliación
+// de Etiquetas (WI-29566 6.6) + los campos finales de FORM-21920.
+router.patch('/:id/conciliacion', async (req, res) => {
+  const { id } = req.params;
+  const { conciliacion, qa_verified_by, totals_match, notas_finales, qnc, usuario } = req.body;
+
+  if (totals_match && !['yes', 'no'].includes(totals_match)) {
+    return res.status(400).json({ error: "totals_match debe ser 'yes' o 'no'" });
+  }
+
+  const update = {};
+  if (conciliacion !== undefined) update.conciliacion = conciliacion;
+  if (qa_verified_by !== undefined) update.qa_verified_by = qa_verified_by;
+  if (totals_match !== undefined) update.totals_match = totals_match;
+  if (notas_finales !== undefined) update.notas_finales = notas_finales;
+  if (qnc !== undefined) update.qnc = qnc;
+
+  const { data: actualizada, error } = await supabase
+    .from('requisiciones').update(update).eq('id', id).select().single();
+  if (error) return res.status(500).json({ error: error.message });
+
+  await registrarAuditoria(id, usuario || 'desconocido', 'conciliacion_guardada', {});
   res.json(actualizada);
 });
 

@@ -124,10 +124,32 @@ CREATE TABLE IF NOT EXISTS requisiciones (
     cantidad_tbox        INTEGER NOT NULL DEFAULT 0,
     cantidad_opbox       INTEGER NOT NULL DEFAULT 0,
     dfu_manual           INTEGER NOT NULL DEFAULT 0,
+    urgencia             TEXT NOT NULL DEFAULT 'Normal' CHECK (urgencia IN ('Normal','Urgente')),
     solicitante          TEXT NOT NULL,
     notas                TEXT,
     estado               TEXT NOT NULL DEFAULT 'pendiente'
                           CHECK (estado IN ('pendiente','en_impresion','lista','rechazada','cancelada')),
+
+    -- Campos del flujo de decision del evaluador (Almacen/Etiquetado)
+    evaluador            TEXT,
+    comentario           TEXT,
+    qnc                  TEXT,
+    fecha_resolucion     TIMESTAMPTZ,
+    fecha_lista          TIMESTAMPTZ,
+
+    -- Conciliacion de Etiquetas (WI-29566 6.6, mitad inferior de FORM-21920).
+    -- Se guarda como JSONB porque es una grilla flexible llenada a mano por
+    -- distintos roles en distintos momentos (cantidadExtra, mfgVerifExtra,
+    -- qaEmpExtra, adicionales, reposicion, totalEntregado, totalDHR, usadas,
+    -- regresadas, destruidas, conciliacionFinal -- cada uno por los 7 tipos
+    -- de etiqueta). No tiene el mismo riesgo de duplicado que numero_lote,
+    -- así que JSONB es razonable aquí (igual que el objeto JS del demo
+    -- original) en vez de una tabla hija con decenas de columnas dispersas.
+    conciliacion         JSONB NOT NULL DEFAULT '{}'::jsonb,
+    qa_verified_by       TEXT,
+    totals_match         TEXT CHECK (totals_match IN ('yes','no')),
+    notas_finales        TEXT,
+
     creado_en            TIMESTAMPTZ NOT NULL DEFAULT now(),
     actualizado_en       TIMESTAMPTZ NOT NULL DEFAULT now(),
 
