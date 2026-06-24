@@ -123,6 +123,22 @@ el valor real es **"N/A"**, no los 5 caracteres. Corregido en
 5. Conectar el proyecto Supabase real (crear proyecto, correr schema.sql +
    seed_areas.sql + seed_catalogo.sql, llenar `.env`).
 
+## ⚠️ INCIDENTE DE SEGURIDAD (24-jun-2026) — credenciales reales expuestas
+Un commit directo en GitHub ("Configuracion env. Example") puso la
+`SUPABASE_URL` y la `SUPABASE_SERVICE_ROLE_KEY` **reales** en
+`backend/.env.example`, en el repositorio **público**. La `service_role`
+key da acceso total a la base de datos sin restricciones de RLS.
+
+**Acción requerida (responsabilidad del usuario, no se puede hacer desde
+aquí): rotar/regenerar la `service_role` key en el dashboard de Supabase
+(Project Settings → API) de inmediato.** El valor que quedó expuesto debe
+considerarse comprometido aunque ya no esté en el archivo actual — sigue
+visible en el historial de git de un repo público.
+
+Se restauró el placeholder en `.env.example` en el siguiente commit. El
+`.gitignore` ya cubre `.env` (el archivo real); el problema fue que el
+valor real se puso en `.env.example` (que sí se versiona) en vez de `.env`.
+
 ## Bitácora de errores (corregidos en esta sesión, antes de llegar a producción)
 1. **Error**: asumí que la secuencia de lote se contaba por (área, fecha de
    producción). **Real**: se cuenta por (área, año de HOY, día-del-año de
