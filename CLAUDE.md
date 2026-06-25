@@ -107,7 +107,51 @@ el valor real es **"N/A"**, no los 5 caracteres. Corregido en
   en capas. PATCH de estado con máquina de transiciones válidas.
 - `src/routes/catalogo.js` — búsqueda por `codigo_catalogo` (la llave real).
 
+## 🆕 Hallazgo de campo (25-jun-2026): segunda causa raíz de sobreconsumo — floorstock no visible en sistema
+Durante recorrido de planta se identificó que el "sobreconsumo" que reporta
+Finanzas al cierre de mes **no es desperdicio físico real** en buena parte
+de los casos — es un problema de **unidad de medida en la salida de
+almacén**:
+- El área de etiquetas solicita, por ejemplo, 200 etiquetas.
+- Almacén solo puede entregar en unidad de empaque completa: sale el
+  **rollo completo de 1000 etiquetas**, porque no se fracciona.
+- El sistema de inventario/almacén descuenta las 1000 unidades contra esa
+  requisición, aunque físicamente solo se usen 200.
+- Las 800 restantes quedan físicamente en el área (**floorstock**), pero
+  **sin registro ni visibilidad en el sistema** — no existe hoy un
+  concepto de "rollo abierto con saldo disponible".
+- Al cierre de mes, Finanzas compara consumo registrado (1000) contra
+  consumo real necesario (200) y reporta un sobreconsumo que no existe en
+  la realidad física.
+
+Esta es una **causa raíz distinta y paralela** a la ya documentada (extras
+fijos de impresión 5+2, calibración FULL CAL). Probablemente con mayor
+peso en el número que ve Finanzas, porque no es desperdicio de material
+sino de **visibilidad de inventario**.
+
+### Nuevo requerimiento de sistema (a diseñar, aún sin construir)
+Lean Labels necesita un concepto de **floorstock / rollo abierto**,
+independiente del `numero_lote` de producción:
+- Entidad de inventario por rollo: identificador de rollo,
+  `codigo_catalogo`, cantidad total del rollo, cantidad consumida
+  acumulada, cantidad disponible (saldo).
+- Una requisición de un código con rollo abierto y saldo suficiente debe
+  **descontar del saldo del rollo**, no generar una nueva salida completa
+  de almacén.
+- Solo cuando el saldo de un rollo llega a 0 (o no alcanza lo solicitado)
+  se abre un rollo nuevo y se registra la salida completa de almacén.
+- **Misma exigencia de control de concurrencia que `numero_lote`**: dos
+  requisiciones simultáneas tomando del mismo rollo abierto deben
+  descontar el saldo de forma atómica (mismo patrón que
+  `siguiente_secuencia_lote()`), para no permitir sobregiro del saldo
+  disponible.
+- Pendiente decidir con el usuario si el rollo abierto vive a nivel de
+  área (un rollo por impresora/área) o a nivel de almacén central
+  compartido entre áreas.
+
 ## Pendientes
+0. **Diseñar el módulo de floorstock/rollo abierto** descrito arriba —
+   nuevo requerimiento, aún sin esquema ni rutas.
 1. Construir el frontend (single-page, selector de rol) que consuma esta
    API en vez de `window.storage`. Reusar UI/lógica de barcode (JsBarcode)
    y PDF (html2canvas + jsPDF) del demo original.
